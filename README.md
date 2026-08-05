@@ -69,53 +69,148 @@ L'application s'appuie sur deux tables clés liées :
 
 ---
 
-## 🛠️ Guide d'Installation (En local)
+## 🛠️ Guide d'Installation & Déploiement
 
-### Prérequis
+### 💻 1. Déploiement en Environnement de Développement Local
+
+#### Prérequis
 *   **PHP** version 8.2 ou supérieure.
-*   **Composer** installé sur votre machine.
-*   **XAMPP** ou un serveur local équivalent.
+*   **Composer** installé.
+*   **XAMPP** ou équivalent pour faire tourner PHP/MySQL.
 *   **Git** installé.
 
-### Étapes d'installation
+#### Étapes d'installation
 1.  **Cloner le dépôt** :
     ```bash
     git clone <URL_DE_VOTRE_DEPOT>
     cd gestion_conges
     ```
-
-2.  **Installer les dépendances Composer (PHP)** :
+2.  **Installer les dépendances PHP** :
     ```bash
     composer install
     ```
-
-3.  **Créer le fichier de configuration d'environnement** :
+3.  **Créer le fichier de configuration** :
     ```bash
     cp .env.example .env
     ```
-
-4.  **Générer la clé de l'application** :
+4.  **Générer la clé d'application** :
     ```bash
     php artisan key:generate
     ```
-
-5.  **Configurer la base de données** :
-    Ouvrez le fichier `.env` et ajustez les lignes correspondantes (ex. pour SQLite ou MySQL) :
+5.  **Configurer la base de données** dans votre fichier `.env` :
     ```ini
     DB_CONNECTION=sqlite
-    # Si SQLite, le projet utilise automatiquement le fichier database/database.sqlite
+    # En SQLite local, le projet utilise database/database.sqlite automatiquement
     ```
-
-6.  **Exécuter les migrations de tables** :
+6.  **Exécuter les migrations** :
     ```bash
     php artisan migrate
     ```
-
-7.  **Lancer le serveur de développement local** :
+7.  **Lancer le serveur de développement** :
     ```bash
     php artisan serve
     ```
-    L'application sera accessible à l'adresse suivante : [http://127.0.0.1:8000](http://127.0.0.1:8000).
+    L'application est disponible sur [http://127.0.0.1:8000](http://127.0.0.1:8000).
+
+---
+
+### 🌐 2. Guide de Déploiement & Hébergement en Production (Real Hosting Guide)
+
+#### A. Hébergement Mutualisé / cPanel (ex: Hostinger, Namecheap, LWS)
+
+1.  **Préparation & Téléversement du code** :
+    *   Compressez votre projet (sans les dossiers `vendor/` et `node_modules/` pour gagner du temps) et téléversez-le via le gestionnaire de fichiers cPanel ou par FTP (FileZilla).
+    *   **Document Root** : Configurez votre nom de domaine ou sous-domaine pour qu'il pointe directement vers le sous-dossier `/public` de votre projet Laravel (ex: `/public_html/gestion_conges/public`). *C'est indispensable pour la sécurité.*
+2.  **Configuration de l'environnement** :
+    *   Éditez le fichier `.env` à la racine de votre projet sur l'hébergeur :
+        ```ini
+        APP_ENV=production
+        APP_DEBUG=false
+        APP_URL=https://votre-domaine.com
+
+        DB_CONNECTION=mysql
+        DB_HOST=127.0.0.1
+        DB_PORT=3306
+        DB_DATABASE=nom_bdd_hebergeur
+        DB_USERNAME=user_bdd_hebergeur
+        DB_PASSWORD=mot_de_passe_bdd
+        ```
+3.  **Commandes de production & Optimisation** :
+    *   Si vous avez un accès SSH dans votre cPanel, exécutez les commandes suivantes. Sinon, vous pouvez utiliser des outils de console intégrés ou configurer des tâches Cron temporaires :
+        ```bash
+        # Mettre à jour les tables en production en forçant la validation
+        php artisan migrate --force
+
+        # Mettre en cache la configuration pour booster les performances
+        php artisan config:cache
+        php artisan route:cache
+        php artisan view:cache
+        ```
+4.  **Droits d'accès et sécurité** :
+    *   Assurez-vous que les dossiers `storage/` et `bootstrap/cache/` ont des permissions d'écriture suffisantes (normalement `755` ou `775` selon la configuration du serveur web).
+
+#### B. Hébergement VPS / Cloud (ex: Ubuntu + Nginx / Apache + MySQL)
+
+1.  **Installation des composants système** (sur Ubuntu 22.04 LTS par exemple) :
+    ```bash
+    sudo apt update && sudo apt upgrade -y
+    sudo apt install -y php8.2 php8.2-fpm php8.2-mysql php8.2-xml php8.2-curl php8.2-mbstring unzip mysql-server nginx certbot python3-certbot-nginx
+    ```
+2.  **Configuration de la base de données MySQL** :
+    ```sql
+    CREATE DATABASE gestion_conges;
+    CREATE USER 'conges_user'@'localhost' IDENTIFIED BY 'mot_de_passe_securise';
+    GRANT ALL PRIVILEGES ON gestion_conges.* TO 'conges_user'@'localhost';
+    FLUSH PRIVILEGES;
+    ```
+3.  **Configuration de l'hôte virtuel Nginx** (`/etc/nginx/sites-available/gestion_conges`) :
+    ```nginx
+    server {
+        listen 80;
+        server_name votre-domaine.com;
+        root /var/www/gestion_conges/public;
+
+        add_header X-Frame-Options "SAMEORIGIN";
+        add_header X-Content-Type-Options "nosniff";
+
+        index index.php;
+
+        charset utf-8;
+
+        location / {
+            try_files $uri $uri/ /index.php?$query_string;
+        }
+
+        location = /favicon.ico { access_log off; log_not_found off; }
+        location = /robots.txt  { access_log off; log_not_found off; }
+
+        error_page 404 /index.php;
+
+        location ~ \.php$ {
+            fastcgi_pass unix:/var/run/php/php8.2-fpm.sock;
+            fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+            include fastcgi_params;
+        }
+
+        location ~ /\.(?!well-known).* {
+            deny all;
+        }
+    }
+    ```
+    Activez le site et redémarrez Nginx :
+    ```bash
+    sudo ln -s /etc/nginx/sites-available/gestion_conges /etc/nginx/sites-enabled/
+    sudo systemctl restart nginx
+    ```
+4.  **Sécurisation HTTPS gratuite (SSL avec Let's Encrypt)** :
+    ```bash
+    sudo certbot --nginx -d votre-domaine.com
+    ```
+5.  **Planificateur de tâches Laravel (Cron)** :
+    Pour exécuter les événements automatiques en arrière-plan, ajoutez cette ligne dans le crontab de votre serveur (`crontab -e`) :
+    ```bash
+    * * * * * cd /var/www/gestion_conges && php artisan schedule:run >> /dev/null 2>&1
+    ```
 
 ---
 
@@ -127,14 +222,12 @@ Par défaut, tous les nouveaux inscrits ont le rôle d'employé. Pour tester les
     ```bash
     php artisan tinker
     ```
-
 2.  Recherchez le compte utilisateur créé et attribuez-lui le rôle `manager` (exemple ici avec le premier utilisateur créé) :
     ```php
     $user = App\Models\User::first();
     $user->role = 'manager';
     $user->save();
     ```
-
 3.  Quittez Tinker :
     ```bash
     exit
