@@ -344,4 +344,97 @@ class LeaveTest extends TestCase
         $response->assertSee('Historique des demandes de congés de ' . $employee->name);
         $response->assertSee('Vacances Perso');
     }
+
+    public function test_employee_cannot_submit_overlapping_leave_request(): void
+    {
+        $user = User::factory()->create(['role' => 'employee']);
+        
+        // Crée un congé existant approved du 10 au 15 (septembre 2026)
+        Leave::create([
+            'user_id' => $user->id,
+            'start_date' => '2026-09-10',
+            'end_date' => '2026-09-15',
+            'type' => 'Congé Annuel Payé',
+            'status' => 'approved',
+        ]);
+
+        // Tente de soumettre un congé chevauchant (ex: du 12 au 14)
+        $response = $this
+            ->actingAs($user)
+            ->post('/leaves', [
+                'start_date' => '2026-09-12',
+                'end_date' => '2026-09-14',
+                'type' => 'Congé Annuel Payé',
+                'reason' => 'Tentative double réservation',
+            ]);
+
+        $response->assertSessionHasErrors(['start_date']);
+    }
+
+    public function test_manager_cannot_approve_own_leave_request(): void
+    {
+        $manager = User::factory()->create(['role' => 'manager']);
+        
+        $leave = Leave::create([
+            'user_id' => $manager->id,
+            'start_date' => now()->addDay()->toDateString(),
+            'end_date' => now()->addDays(3)->toDateString(),
+            'type' => 'Congé Annuel Payé',
+            'status' => 'pending',
+        ]);
+
+        $response = $this
+            ->actingAs($manager)
+            ->post("/leaves/{$leave->id}/approve");
+
+        $response->assertSessionHas('error', 'Vous ne pouvez pas valider ou refuser votre propre demande de congé.');
+        $this->assertDatabaseHas('leaves', [
+            'id' => $leave->id,
+            'status' => 'pending',
+        ]);
+    }
+
+    public function test_manager_cannot_approve_non_pending_leave_request(): void
+    {
+        $manager = User::factory()->create(['role' => 'manager']);
+        $employee = User::factory()->create(['role' => 'employee']);
+        
+        $leave = Leave::create([
+            'user_id' => $employee->id,
+            'start_date' => now()->addDay()->toDateString(),
+            'end_date' => now()->addDays(3)->toDateString(),
+            'type' => 'Congé Annuel Payé',
+            'status' => 'approved', // déjà approuvée
+        ]);
+
+        $response = $this
+            ->actingAs($manager)
+            ->post("/leaves/{$leave->id}/approve");
+
+        $response->assertSessionHas('error', 'Cette demande de congé a déjà été traitée par un autre gestionnaire.');
+    }
+
+    public function test_employee_can_submit_sick_leave_with_past_start_date(): void
+    {
+        $user = User::factory()->create(['role' => 'employee']);
+
+        // Tente de soumettre un congé maladie qui a débuté dans le passé (ex: hier)
+        $response = $this
+            ->actingAs($user)
+            ->post('/leaves', [
+                'start_date' => now()->subDay()->toDateString(), // hier
+                'end_date' => now()->addDay()->toDateString(),
+                'type' => 'Congé de Maladie',
+                'reason' => 'Grippe déclarée hier',
+            ]);
+
+        $response->assertSessionHasNoErrors();
+        $response->assertRedirect();
+        
+        $this->assertDatabaseHas('leaves', [
+            'user_id' => $user->id,
+            'type' => 'Congé de Maladie',
+            'status' => 'pending',
+        ]);
+    }
 }

@@ -28,13 +28,39 @@ class LeaveController extends Controller
     public function store(Request $request)
     {
         // 1. On vérifie que les données du formulaire sont correctes
-        $request->validate([
-            'start_date' => 'required|date|after_or_equal:today',
+        $rules = [
             'end_date' => 'required|date|after_or_equal:start_date',
             'type' => 'required|string',
             'reason' => 'nullable|string',
             'document' => 'nullable|file|mimes:pdf,jpg,png,jpeg|max:2048', // 2 Mo max
-        ]);
+        ];
+
+        if ($request->type === 'Congé de Maladie') {
+            $rules['start_date'] = 'required|date';
+        } else {
+            $rules['start_date'] = 'required|date|after_or_equal:today';
+        }
+
+        $request->validate($rules);
+
+        // Validation contre le chevauchement de congés (double réservation)
+        $overlappingLeave = Leave::where('user_id', Auth::id())
+            ->whereIn('status', ['pending', 'approved'])
+            ->where(function ($query) use ($request) {
+                $query->whereBetween('start_date', [$request->start_date, $request->end_date])
+                      ->orWhereBetween('end_date', [$request->start_date, $request->end_date])
+                      ->orWhere(function ($q) use ($request) {
+                          $q->where('start_date', '<=', $request->start_date)
+                            ->where('end_date', '>=', $request->end_date);
+                      });
+            })
+            ->exists();
+
+        if ($overlappingLeave) {
+            return redirect()->back()->withErrors([
+                'start_date' => 'Vous avez déjà une demande de congé en attente ou validée qui chevauche cette période.'
+            ])->withInput();
+        }
 
         // Validation des durées imposées par la législation marocaine
         $fixedDurations = [
@@ -128,6 +154,16 @@ class LeaveController extends Controller
             abort(403, 'Action non autorisée.');
         }
 
+        // Vérification de la concurrence d'état
+        if ($leave->status !== 'pending') {
+            return redirect()->back()->with('error', 'Cette demande de congé a déjà été traitée par un autre gestionnaire.');
+        }
+
+        // Vérification d'auto-approbation
+        if ($leave->user_id === $request->user()->id) {
+            return redirect()->back()->with('error', 'Vous ne pouvez pas valider ou refuser votre propre demande de congé.');
+        }
+
         $request->validate([
             'manager_comment' => 'nullable|string|max:1000',
         ]);
@@ -145,6 +181,16 @@ class LeaveController extends Controller
     {
         if ($request->user()->role !== 'manager') {
             abort(403, 'Action non autorisée.');
+        }
+
+        // Vérification de la concurrence d'état
+        if ($leave->status !== 'pending') {
+            return redirect()->back()->with('error', 'Cette demande de congé a déjà été traitée par un autre gestionnaire.');
+        }
+
+        // Vérification d'auto-approbation
+        if ($leave->user_id === $request->user()->id) {
+            return redirect()->back()->with('error', 'Vous ne pouvez pas valider ou refuser votre propre demande de congé.');
         }
 
         $request->validate([
