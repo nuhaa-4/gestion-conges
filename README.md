@@ -27,7 +27,7 @@ Contrairement aux applications classiques calquées sur le modèle français (av
 *   **Formulaire de Demande intelligent** :
     *   Sélection du type de congé (Congé Annuel, Maladie, Récupération, Événement familial, Maternité, Paternité).
     *   **Contrôle dynamique des durées** : Calcul automatique de la date de fin en fonction de la date de début pour les congés légaux fixes (ex: le champ date de fin se bloque automatiquement sur +3 jours pour la paternité).
-    *   Possibilité d'ajouter un **justificatif** (PDF, PNG, JPG) avec un bouton **"Effacer"** dynamique si l'employé se trompe de fichier avant de soumettre.
+    *   **Gestion des justificatifs** : Possibilité d'ajouter un justificatif (PDF, PNG, JPG) avec un bouton **"Effacer"** dynamique si l'employé se trompe de fichier avant de soumettre.
 *   **Historique Personnel** : Visualisation en temps réel de ses demandes avec leur statut (Validée, Refusée, En attente) et le commentaire d'explication du manager.
 
 ### 👥 Espace Manager (RH)
@@ -37,6 +37,21 @@ Contrairement aux applications classiques calquées sur le modèle français (av
 *   **Historique Global** : Tableau récapitulatif des demandes traitées au bas du tableau de bord.
 *   **Annuaire des Salariés** : Liste de tous les collaborateurs avec leur rôle, le nombre total de congés pris, et accès à une fiche d'édition.
 *   **Historique Individuel** : Consultation de l'historique complet et isolé d'un seul salarié directement depuis sa fiche d'édition.
+
+---
+
+## 🔒 Sécurité & Logique Métier (Audit RH)
+
+L'application intègre des contrôles stricts de validation tant au niveau de l'interface qu'au niveau du serveur pour assurer la conformité RH et bloquer toute faille de logique ou d'accès :
+
+*   **Anti-chevauchement de congés** : Blocage automatique côté serveur de toute demande dont la période se superpose à un congé existant approuvé ou en attente pour le même collaborateur.
+*   **Interdiction d'auto-validation** : Les managers ne peuvent en aucun cas valider ou refuser leurs propres demandes de congés.
+*   **Flexibilité pour les arrêts maladie** : La règle d'interdiction de poser dans le passé (`after_or_equal:today`) est assouplie uniquement pour le type "Congé de Maladie" pour autoriser la déclaration rétroactive d'un certificat sous 48h.
+*   **Gestion de la concurrence (Double validation)** : Le serveur s'assure qu'une demande est toujours à l'état `'pending'` avant de la traiter, évitant ainsi les conflits si deux managers modifient le statut d'une même demande simultanément.
+*   **Sécurisation Eloquent & CSRF** :
+    *   Utilisation de la directive `@csrf` sur l'ensemble des formulaires.
+    *   Protection contre le Mass Assignment via le paramétrage des champs `$fillable`.
+    *   Prévention contre les injections SQL grâce à l'ORM Eloquent.
 
 ---
 
@@ -53,19 +68,17 @@ Contrairement aux applications classiques calquées sur le modèle français (av
 
 ### Structure Base de Données
 L'application s'appuie sur deux tables clés liées :
-1.  **`users`** : Enrichie d'une colonne `role` (valeurs : `employee` ou `manager`).
-2.  **`leaves`** : Liée à la table `users` par une clé étrangère `user_id` avec suppression en cascade. Elle enregistre les types, motifs, justificatifs, dates, statuts et commentaires de validation.
+1.  **`users`** : Contient les informations des salariés et intègre une colonne `role` (valeurs : `employee` ou `manager`).
+2.  **`leaves`** : Liée à la table `users` par une clé étrangère `user_id` avec suppression en cascade. Enregistre le type de congé, les dates, le motif, le chemin du justificatif (`document_path`), le statut (`pending`, `approved`, `rejected`) et le commentaire de validation (`manager_comment`).
 
 ---
 
-## 🔒 Sécurité Implémentée
+## 🧪 Tests Automatisés & Assurance Qualité
 
-*   **Protection CSRF** : Protection systématique de tous les formulaires contre les attaques de type Cross-Site Request Forgery via la directive `@csrf`.
-*   **Middlewares d'accès** : Protection des routes sensibles (`auth`, `verified`) pour garantir que seules les personnes autorisées accèdent aux tableaux de bord.
-*   **Sécurisation Eloquent** :
-    *   Prévention contre le Mass Assignment grâce à la définition stricte des champs `$fillable` dans les modèles.
-    *   Prévention contre les injections SQL grâce à l'utilisation systématique des requêtes préparées de l'ORM Eloquent.
-*   **Validation stricte côté serveur** : Recalcul et validation stricte de la cohérence des dates et des durées imposées par le contrôleur back-end PHP pour empêcher toute manipulation frauduleuse du code HTML client.
+L'application intègre une suite de **44 tests fonctionnels et unitaires** (PHPUnit / Pest) pour valider l'intégrité de la plateforme. La commande `php artisan test` permet de s'assurer du bon fonctionnement :
+*   De la validation des formulaires et du téléversement de documents.
+*   Du routage et du contrôle d'accès en fonction des rôles (`employee`/`manager`).
+*   Des règles logiques complexes issues de l'audit (chevauchements, auto-validation, dates passées pour maladie, concurrence d'état).
 
 ---
 
@@ -136,7 +149,7 @@ L'application s'appuie sur deux tables clés liées :
         DB_PASSWORD=mot_de_passe_bdd
         ```
 3.  **Commandes de production & Optimisation** :
-    *   Si vous avez un accès SSH dans votre cPanel, exécutez les commandes suivantes. Sinon, vous pouvez utiliser des outils de console intégrés ou configurer des tâches Cron temporaires :
+    *   Si vous avez un accès SSH dans votre cPanel, exécutez les commandes suivantes :
         ```bash
         # Mettre à jour les tables en production en forçant la validation
         php artisan migrate --force
